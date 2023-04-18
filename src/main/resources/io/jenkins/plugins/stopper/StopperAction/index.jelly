@@ -1,0 +1,65 @@
+
+<!--
+The MIT License
+
+Copyright (c) 2004-2013, Sun Microsystems, Inc., Kohsuke Kawaguchi, id:cactusman, Vincent Latombe
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+-->
+
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <j:getStatic var="permission" className="hudson.model.Item" field="CREATE"/>
+  <l:layout norefresh="true" permission="${permission}" title="${Stopper}">
+    <j:set var="children" value="${it.children}" />
+    <l:main-panel>
+      <h3>QUEUE</h3>
+      <div>
+
+        <f:textarea value="${children.items}" readonly="readonly"></f:textarea>
+        <br/>
+        <f:form method="post" action="cancel">
+          <f:block>
+            <f:submit name="Submit" value="Cancel"/>
+          </f:block>
+        </f:form>
+      </div>
+
+      <h3>BUILD</h3>
+      <div>
+        <f:textarea value="${children.runs}" readonly="readonly"></f:textarea>
+        <br/>
+        <f:form method="post" action="abort">
+          <f:block>
+            <f:submit name="Submit" value="Abort"/>
+          </f:block>
+        </f:form>
+      </div>
+
+      <div>
+        <f:form method="post" action="cancelAndAbort">
+          <f:block>
+            <f:submit name="Submit" value="Cancel + Abort"/>
+          </f:block>
+        </f:form>
+      </div>
+
+    </l:main-panel>
+  </l:layout>
+</j:jelly>
