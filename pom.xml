@@ -19,12 +19,13 @@
             <url>https://opensource.org/licenses/MIT</url>
         </license>
     </licenses>
-    <scm child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">
-        <connection>scm:git:https://github.com/${gitHubRepo}</connection>
-        <developerConnection>scm:git:https://github.com/${gitHubRepo}</developerConnection>
-        <tag>${scmTag}</tag>
-        <url>https://github.com/${gitHubRepo}</url>
-    </scm>    <properties>
+    <!--<scm child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">-->
+        <!--<connection>scm:git:https://github.com/${gitHubRepo}</connection>-->
+        <!--<developerConnection>scm:git:https://github.com/${gitHubRepo}</developerConnection>-->
+        <!--<tag>${scmTag}</tag>-->
+        <!--<url>https://github.com/${gitHubRepo}</url>-->
+    <!--</scm>-->
+    <properties>
         <revision>1.0.0</revision>
         <!-- https://www.jenkins.io/doc/developer/plugin-development/choosing-jenkins-baseline/ -->
         <jenkins.version>2.361.4</jenkins.version>
@@ -43,7 +44,18 @@
             <artifactId>downstream-build-cache</artifactId>
             <version>1.7</version>
         </dependency>
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>PrioritySorter</artifactId>
+            <version>4.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>nodelabelparameter</artifactId>
+            <version>1.11.0</version>
+        </dependency>
     </dependencies>
+
 
     <repositories>
         <repository>

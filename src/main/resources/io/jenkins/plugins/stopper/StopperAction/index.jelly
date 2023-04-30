@@ -28,6 +28,8 @@ THE SOFTWARE.
   <j:getStatic var="permission" className="hudson.model.Item" field="CREATE"/>
   <l:layout norefresh="true" permission="${permission}" title="${Stopper}">
     <j:set var="children" value="${it.children}" />
+    <j:set var="priorities" value="${it.priorities}" />
+    <j:set var="nodes" value="${it.nodes}" />
     <l:main-panel>
       <h3>QUEUE</h3>
       <div>
@@ -37,6 +39,31 @@ THE SOFTWARE.
         <f:form method="post" action="cancel">
           <f:block>
             <f:submit name="Submit" value="Cancel"/>
+          </f:block>
+        </f:form>
+
+        <f:form method="post" action="updatePriority">
+
+          <f:block>
+            <!--<input type="text" name="priority" placeholder="priority"></input>-->
+
+            <select name="priority">
+              <j:forEach var="priority" items="${priorities}">
+                <f:option value="${priority.value}">${priority.name}</f:option>
+              </j:forEach>
+            </select> <j:whitespace />
+            <f:submit name="Submit" value="Change"/>
+          </f:block>
+        </f:form>
+        <f:form method="post" action="updateNode">
+          <f:block>
+            <!--<input type="text" name="node" placeholder="node"></input>-->
+            <select name="node">
+              <j:forEach var="node" items="${nodes}">
+                <f:option value="${node}">${node}</f:option>
+              </j:forEach>
+            </select> <j:whitespace />
+            <f:submit name="Submit" value="Change"/>
           </f:block>
         </f:form>
       </div>
