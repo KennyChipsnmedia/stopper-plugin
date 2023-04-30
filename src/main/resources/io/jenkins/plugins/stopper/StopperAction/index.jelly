@@ -27,65 +27,77 @@ THE SOFTWARE.
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
   <j:getStatic var="permission" className="hudson.model.Item" field="CREATE"/>
   <l:layout norefresh="true" permission="${permission}" title="${Stopper}">
-    <j:set var="children" value="${it.children}" />
+    <!--<j:set var="children" value="${it.children}" />-->
     <j:set var="priorities" value="${it.priorities}" />
     <j:set var="nodes" value="${it.nodes}" />
+    <j:set var="runList" value="${it.runList}" />
+
     <l:main-panel>
-      <h3>QUEUE</h3>
-      <div>
+      <j:if test="${runList.size() == 0}">
+        <h2>No Running Process for this Job</h2>
+      </j:if>
+      <j:if test="${runList.size() != 0}">
+        <j:forEach var="run" items="${runList}">
+          <h2>BUILD NUMBER: ${run.number}</h2>
+          <j:set var="children" value="${it.getChildren(run.number)}" />
+          <h3>QUEUE</h3>
+          <div>
+            <f:textarea value="${children.items}" readonly="readonly"></f:textarea>
+            <br/>
+            <f:form method="post" action="cancel">
+              <f:block>
+                <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <f:submit name="Submit" value="Cancel"/>
+              </f:block>
+            </f:form>
 
-        <f:textarea value="${children.items}" readonly="readonly"></f:textarea>
-        <br/>
-        <f:form method="post" action="cancel">
-          <f:block>
-            <f:submit name="Submit" value="Cancel"/>
-          </f:block>
-        </f:form>
+            <f:form method="post" action="updatePriority">
 
-        <f:form method="post" action="updatePriority">
+              <f:block>
+                <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <select name="priority">
+                  <j:forEach var="priority" items="${priorities}">
+                    <f:option value="${priority.value}">${priority.name}</f:option>
+                  </j:forEach>
+                </select> <j:whitespace />
+                <f:submit name="Submit" value="Change"/>
+              </f:block>
+            </f:form>
+            <f:form method="post" action="updateNode">
+              <f:block>
+                <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <select name="node">
+                  <j:forEach var="node" items="${nodes}">
+                    <f:option value="${node}">${node}</f:option>
+                  </j:forEach>
+                </select> <j:whitespace />
+                <f:submit name="Submit" value="Change"/>
+              </f:block>
+            </f:form>
+          </div>
 
-          <f:block>
-            <!--<input type="text" name="priority" placeholder="priority"></input>-->
+          <h3>BUILD</h3>
+          <div>
+            <f:textarea value="${children.runs}" readonly="readonly"></f:textarea>
+            <br/>
+            <f:form method="post" action="abort">
+              <f:block>
+                <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <f:submit name="Submit" value="Abort"/>
+              </f:block>
+            </f:form>
+          </div>
 
-            <select name="priority">
-              <j:forEach var="priority" items="${priorities}">
-                <f:option value="${priority.value}">${priority.name}</f:option>
-              </j:forEach>
-            </select> <j:whitespace />
-            <f:submit name="Submit" value="Change"/>
-          </f:block>
-        </f:form>
-        <f:form method="post" action="updateNode">
-          <f:block>
-            <!--<input type="text" name="node" placeholder="node"></input>-->
-            <select name="node">
-              <j:forEach var="node" items="${nodes}">
-                <f:option value="${node}">${node}</f:option>
-              </j:forEach>
-            </select> <j:whitespace />
-            <f:submit name="Submit" value="Change"/>
-          </f:block>
-        </f:form>
-      </div>
-
-      <h3>BUILD</h3>
-      <div>
-        <f:textarea value="${children.runs}" readonly="readonly"></f:textarea>
-        <br/>
-        <f:form method="post" action="abort">
-          <f:block>
-            <f:submit name="Submit" value="Abort"/>
-          </f:block>
-        </f:form>
-      </div>
-
-      <div>
-        <f:form method="post" action="cancelAndAbort">
-          <f:block>
-            <f:submit name="Submit" value="Cancel + Abort"/>
-          </f:block>
-        </f:form>
-      </div>
+          <div>
+            <f:form method="post" action="cancelAndAbort">
+              <f:block>
+                <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <f:submit name="Submit" value="Cancel + Abort"/>
+              </f:block>
+            </f:form>
+          </div>
+        </j:forEach>
+      </j:if>
 
     </l:main-panel>
   </l:layout>

@@ -17,6 +17,7 @@ import hudson.slaves.NodePropertyDescriptor;
 import hudson.util.ClockDifference;
 import hudson.util.DescribableList;
 import hudson.util.ListBoxModel;
+import hudson.util.RunList;
 import jenkins.advancedqueue.PriorityConfiguration;
 import jenkins.advancedqueue.PrioritySorterConfiguration;
 import jenkins.advancedqueue.priority.strategy.PriorityJobProperty;
@@ -48,9 +49,12 @@ import java.util.stream.Collectors;
 public class StopperAction implements Action {
     private static final Logger LOGGER = Logger.getLogger(StopperAction.class.getName());
     private final Run target;
+    private List<Run> runList;
 
-    public StopperAction(Run run) {
+    public StopperAction(Run run, List<Run> runList) {
         this.target = run;
+        this.runList = runList;
+
     }
 
     @Override
@@ -96,10 +100,24 @@ public class StopperAction implements Action {
         });
     }
 
-    public ListBoxModel getPriorities() {
-//        ListBoxModel items = PrioritySorterConfiguration.get().doGetPriorityItems();
+    public List<Run> getRunList() {
+        LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " runList size:" + runList.size());
+        runList.forEach(r -> {
+            LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
+        });
+        return runList;
+    }
 
-        LOGGER.log(Level.INFO, "getting priorities");
+    public List<Integer> getNumbers() {
+        List<Integer> numbers = new ArrayList<Integer>();
+        runList.forEach(r -> {
+            LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
+            numbers.add(r.getNumber());
+        });
+        return numbers;
+    }
+
+    public ListBoxModel getPriorities() {
         ListBoxModel items = PriorityConfiguration.get().getPriorities();
         LOGGER.log(Level.INFO, "getPriorites items size:" + items.size());
         items.forEach(item -> {
@@ -109,7 +127,6 @@ public class StopperAction implements Action {
     }
 
     public List<String> getNodes() {
-        LOGGER.log(Level.INFO, "getting nodes");
         List<String> nodes = new ArrayList<>();
         nodes.add("built-in");
         Jenkins.get().getNodes().forEach(n -> {
@@ -118,23 +135,27 @@ public class StopperAction implements Action {
         return nodes;
     }
 
-    public Map<String, String> getChildren() {
+    public Map<String, String> getChildren(int buildNumber) {
+        Map<String, String> children= new HashMap<>();
+        children.put("runs", "");
+        children.put("items", "");
+
+        Optional<Run> optRun = runList.stream().filter(r -> r.getNumber() == buildNumber).findAny();
+        if(optRun.isEmpty()) {
+            return children;
+        }
+
+        //
         Set<Run> runs = ConcurrentHashMap.newKeySet();
         Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
 
-        //
-
+        Run target = optRun.get();
         String fullDisplayName = target.getFullDisplayName();
         String displayName = target.getDisplayName();
         int number = target.getNumber();
         LOGGER.log(Level.INFO, "TARGET fullDisplayName:" + fullDisplayName +" displayName:" + displayName + " number:" + number);
 
-
         fetchRunAndItems(true, target, runs, items);
-
-        Map<String, String> children= new HashMap<>();
-        children.put("runs", "");
-        children.put("items", "");
 
         StringBuilder sb = new StringBuilder();
 
@@ -167,12 +188,8 @@ public class StopperAction implements Action {
 
         });
 
-
-
-        //
-        Jenkins.get().getQueue().maintain();
-        //
         children.put("items", sb.toString());
+
         return children;
     }
 
@@ -182,33 +199,25 @@ public class StopperAction implements Action {
 //        Jenkins.get().getQueue().getBuildableItems().sort(sorter);
     }
 
-    @RequirePOST
-    public void doShowTest(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
-        Set<Run> runs = ConcurrentHashMap.newKeySet();
-        Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
-        fetchRunAndItems(true, target, runs, items);
-
-        LOGGER.log(Level.INFO, "items ===>");
-        items.forEach(i -> {
-            LOGGER.log(Level.INFO, "item:" + i.task.getName());
-            Jenkins.get().getQueue().cancel(i);
-//            Jenkins.get().getQueue().schedule(i.task, 0);
-        });
-
-        LOGGER.log(Level.INFO, "runs ===>");
-        runs.forEach(r -> {
-            LOGGER.log(Level.INFO, "run:" + r.getFullDisplayName() + " isBuilding:" + r.isBuilding());
-            if(r.isBuilding()) {
-                r.getExecutor().interrupt(Result.ABORTED);
-            }
-        });
-    }
-
     interface worker {
         void doit();
     }
 
     private void processRequest(StaplerRequest req, StaplerResponse rsp, int flag) {
+        String tmpBuildNumber = req.getParameter("buildNumber");
+        if(StringUtils.isBlank(tmpBuildNumber)) {
+            return;
+        }
+
+        int buildNumber = Integer.parseInt(tmpBuildNumber);
+
+        Optional<Run> optRun = runList.stream().filter(r -> r.getNumber() == buildNumber).findAny();
+        if(optRun.isEmpty()) {
+            return;
+        }
+
+        //
+        Run target = optRun.get();
 
         Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
         Set<Run> runs = ConcurrentHashMap.newKeySet();
@@ -274,25 +283,42 @@ public class StopperAction implements Action {
 
     @RequirePOST
     public void doUpdatePriority(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
-        String priority = req.getParameter("priority");
-
-        if(!StringUtils.isBlank(priority)) {
-            Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
-            Set<Run> runs = ConcurrentHashMap.newKeySet();
-
-            fetchRunAndItems(true, target, runs, items);
-            int tmpPriority = Integer.parseInt(priority);
-
-            int newPriority = tmpPriority == -1 ? PrioritySorterConfiguration.get().getStrategy().getDefaultPriority() : tmpPriority;
-
-            items.forEach(i -> {
-                ItemInfo itemInfo = QueueItemCache.get().getItem(i.getId());
-                itemInfo.setPrioritySelection(newPriority);
-                itemInfo.setWeightSelection(newPriority);
-            });
-
-            Jenkins.get().getQueue().maintain();
+        String tmpBuildNumber = req.getParameter("buildNumber");
+        if(StringUtils.isBlank(tmpBuildNumber)) {
+            rsp.forwardToPreviousPage(req);
+            return;
         }
+
+
+        String priority = req.getParameter("priority");
+        if(StringUtils.isBlank(priority)) {
+            rsp.forwardToPreviousPage(req);
+            return;
+        }
+
+        //
+        int buildNumber = Integer.parseInt(tmpBuildNumber);
+        Optional<Run> optRun = runList.stream().filter(r -> r.getNumber() == buildNumber).findAny();
+        if(optRun.isEmpty()) {
+            return;
+        }
+
+        Run target = optRun.get();
+        Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
+        Set<Run> runs = ConcurrentHashMap.newKeySet();
+
+        fetchRunAndItems(true, target, runs, items);
+        int tmpPriority = Integer.parseInt(priority);
+
+        int newPriority = tmpPriority == -1 ? PrioritySorterConfiguration.get().getStrategy().getDefaultPriority() : tmpPriority;
+
+        items.forEach(i -> {
+            ItemInfo itemInfo = QueueItemCache.get().getItem(i.getId());
+            itemInfo.setPrioritySelection(newPriority);
+            itemInfo.setWeightSelection(newPriority);
+        });
+
+        Jenkins.get().getQueue().maintain();
 
         rsp.forwardToPreviousPage(req);
 
@@ -337,60 +363,77 @@ public class StopperAction implements Action {
 
     @RequirePOST
     public void doUpdateNode(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
+        String tmpBuildNumber = req.getParameter("buildNumber");
+        if(StringUtils.isBlank(tmpBuildNumber)) {
+            rsp.forwardToPreviousPage(req);
+            return;
+        }
+
         String node = req.getParameter("node");
+        if(StringUtils.isBlank(node)) {
+            rsp.forwardToPreviousPage(req);
+            return;
+        }
 
-        if(!StringUtils.isBlank(node)) {
-            Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
-            Set<Run> runs = ConcurrentHashMap.newKeySet();
-            fetchRunAndItems(true, target, runs, items);
+        //
+        int buildNumber = Integer.parseInt(tmpBuildNumber);
+        Optional<Run> optRun = runList.stream().filter(r -> r.getNumber() == buildNumber).findAny();
+        if(optRun.isEmpty()) {
+            return;
+        }
+
+        Run target = optRun.get();
+        Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
+        Set<Run> runs = ConcurrentHashMap.newKeySet();
+        fetchRunAndItems(true, target, runs, items);
 
 
-            Node newNode = Jenkins.get().getNode(node);
-            if(newNode != null) {
-                items.forEach(i -> {
+        Node newNode = Jenkins.get().getNode(node);
+        if(newNode != null) {
+            items.forEach(i -> {
 
-                    Label label = i.getAssignedLabel();
-                    if(label != null) {
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label:" + label.getName());
+                Label label = i.getAssignedLabel();
+                if(label != null) {
+                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label:" + label.getName());
 
-                        Iterator iter = i.getActions(LabelAssignmentAction.class).iterator();
+                    Iterator iter = i.getActions(LabelAssignmentAction.class).iterator();
 
-                        Label l = null;
-                        do {
-                            if (!iter.hasNext()) {
-                                l = i.task.getAssignedLabel();
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND label:" + l.getName());
-                                break;
-                            }
+                    Label l = null;
+                    do {
+                        if (!iter.hasNext()) {
+                            l = i.task.getAssignedLabel();
+                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND label:" + l.getName());
+                            break;
+                        }
 
-                            LabelAssignmentAction laa = (LabelAssignmentAction)iter.next();
-                            l = laa.getAssignedLabel(i.task);
+                        LabelAssignmentAction laa = (LabelAssignmentAction)iter.next();
+                        l = laa.getAssignedLabel(i.task);
 
-                            if(laa instanceof ParametersAction) {
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " laa ParametersAction");
-                                Label l2 = ((ParametersAction) laa).getAssignedLabel(i.task);
+                        if(laa instanceof ParametersAction) {
+                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " laa ParametersAction");
+                            Label l2 = ((ParametersAction) laa).getAssignedLabel(i.task);
 //                                ((ParametersAction) laa).getParameters().forEach(parameterValue -> {
 //                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameterValue:" + parameterValue.toString());
 //                                });
-                                if(l2 != null) {
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " l2:" + l2.toString());
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa size:" + ((ParametersAction) laa).getParameters().size());
-                                    ((ParametersAction) laa).getParameters().forEach(p -> {
-                                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa:" + p.toString() + " name:" + p.getName() + " value:" + p.getValue());
-                                        if(p instanceof LabelParameterValue) {
-                                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " it's LabelParameterValue");
-                                        }
-                                    });
-                                }
-
+                            if(l2 != null) {
+                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " l2:" + l2.toString());
+                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa size:" + ((ParametersAction) laa).getParameters().size());
+                                ((ParametersAction) laa).getParameters().forEach(p -> {
+                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa:" + p.toString() + " name:" + p.getName() + " value:" + p.getValue());
+                                    if(p instanceof LabelParameterValue) {
+                                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " it's LabelParameterValue");
+                                    }
+                                });
                             }
-                        } while(l == null);
 
-                        if(l != null) {
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND2 label:" + l.getName());
                         }
+                    } while(l == null);
 
+                    if(l != null) {
+                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND2 label:" + l.getName());
                     }
+
+                }
 
                     /*
                     if(label != null) {
@@ -440,68 +483,67 @@ public class StopperAction implements Action {
 
 
 
-                    i.getAllActions().forEach(a ->{
-                        if(a instanceof ParametersAction) {
-                            ParametersAction action = (ParametersAction)a;
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " action is ParametersAction");
-                            List<ParameterValue> parameters = action.getAllParameters();
+                i.getAllActions().forEach(a ->{
+                    if(a instanceof ParametersAction) {
+                        ParametersAction action = (ParametersAction)a;
+                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " action is ParametersAction");
+                        List<ParameterValue> parameters = action.getAllParameters();
 
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameters size:" + parameters.size());
-                            parameters.forEach(p -> {
+                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameters size:" + parameters.size());
+                        parameters.forEach(p -> {
 
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameter is:" + p.toString());
-                                if(p instanceof LabelParameterValue) {
-                                    i.removeAction(action);
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label not null paramAction removed");
-                                }
-                                else {
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " not instance of LabelParameterValue, name:" + p.getName());
-                                }
-                            });
-                        }
-                    });
+                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameter is:" + p.toString());
+                            if(p instanceof LabelParameterValue) {
+                                i.removeAction(action);
+                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label not null paramAction removed");
+                            }
+                            else {
+                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " not instance of LabelParameterValue, name:" + p.getName());
+                            }
+                        });
+                    }
+                });
 //                    LabelParameterValue paramValue = new LabelParameterValue(newNode.getNodeName(), newNode.getLabelString(), false, new AllNodeEligibility());
-                    List<String> labels = new ArrayList<>();
-                    labels.add(newNode.getNodeName());
-                    NodeParameterValue paramValue = new NodeParameterValue(newNode.getNodeName(), labels, new AllNodeEligibility());
+                List<String> labels = new ArrayList<>();
+                labels.add(newNode.getNodeName());
+                NodeParameterValue paramValue = new NodeParameterValue(newNode.getNodeName(), labels, new AllNodeEligibility());
 //                    NodeParameterDefinition npd = new NodeParameterDefinition()
 
-                    ParametersAction parametersAction = new ParametersAction(paramValue);
+                ParametersAction parametersAction = new ParametersAction(paramValue);
 
-                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " DEBUG bef addAction size:" + parametersAction.getAllParameters().size());
+                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " DEBUG bef addAction size:" + parametersAction.getAllParameters().size());
 
 
-                    i.addAction(parametersAction);
-                });
-            }
-            else {
-                if(node.equals("built-in") || node.equals("default")) {
-                    items.forEach(i -> {
-                        i.getActions(ParametersAction.class).forEach(action -> {
-                            action.getAllParameters().forEach(p -> {
-                                if(p instanceof LabelParameterValue) {
-                                    i.removeAction(action);
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " built-in, old paramAction removed");
-                                }
-                            });
+                i.addAction(parametersAction);
+            });
+        }
+        else {
+            if(node.equals("built-in") || node.equals("default")) {
+                items.forEach(i -> {
+                    i.getActions(ParametersAction.class).forEach(action -> {
+                        action.getAllParameters().forEach(p -> {
+                            if(p instanceof LabelParameterValue) {
+                                i.removeAction(action);
+                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " built-in, old paramAction removed");
+                            }
                         });
-
                     });
 
-                }
-                else { // for debugging
-                    LOGGER.log(Level.SEVERE, "node:" + node + " not found");
-                    LOGGER.log(Level.INFO, "Jenkins has nodes =>");
-                    for(Node n: Jenkins.get().getNodes()) {
-                        LOGGER.log(Level.INFO, n.getNodeName());
-                    }
-                    LOGGER.log(Level.INFO, "<= Jenkins has nodes");
-                }
+                });
 
             }
+            else { // for debugging
+                LOGGER.log(Level.SEVERE, "node:" + node + " not found");
+                LOGGER.log(Level.INFO, "Jenkins has nodes =>");
+                for(Node n: Jenkins.get().getNodes()) {
+                    LOGGER.log(Level.INFO, n.getNodeName());
+                }
+                LOGGER.log(Level.INFO, "<= Jenkins has nodes");
+            }
 
-            Jenkins.get().getQueue().maintain();
         }
+
+        Jenkins.get().getQueue().maintain();
 
 
         rsp.forwardToPreviousPage(req);
@@ -517,7 +559,10 @@ public class StopperAction implements Action {
 
         @Override
         public Collection<? extends Action> createFor(Run run) {
-            return Collections.singleton(new StopperAction(run));
+
+            List<Run> runList = new ArrayList<>();
+            runList.add(run);
+            return Collections.singleton(new StopperAction(run, runList));
         }
     }
 
@@ -532,12 +577,25 @@ public class StopperAction implements Action {
 
         @Override
         public Collection<? extends Action> createFor(@Nonnull Job target) {
+
+            List<Run> runList = target.getBuilds();
+            runList = ((RunList<Run>) runList).filter(r -> r.isBuilding());
+
+            ArrayList<Run> runArrayList = new ArrayList<>(runList);
+
+            Collections.sort(runArrayList, new Comparator<Run>() {
+                @Override
+                public int compare(Run o1, Run o2) {
+                    return o1.getNumber() - o2.getNumber();
+                }
+            });
+
             Run build = target.getLastBuild();
 
             if (build == null) {
                 return Collections.emptyList();
             } else {
-                return Collections.singleton(new StopperAction(build));
+                return Collections.singleton(new StopperAction(build, runArrayList));
             }
         }
     }
