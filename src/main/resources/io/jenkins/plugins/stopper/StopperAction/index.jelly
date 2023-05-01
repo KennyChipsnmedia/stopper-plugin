@@ -42,11 +42,11 @@ THE SOFTWARE.
           <j:set var="children" value="${it.getChildren(run.number)}" />
           <h3>QUEUE</h3>
           <div>
-            <f:textarea value="${children.items}" readonly="readonly"></f:textarea>
             <br/>
             <f:form method="post" action="cancel">
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <f:textarea name="qtems" id="qtems" value="${children.items}" ></f:textarea>
                 <f:submit name="Submit" value="Cancel"/>
               </f:block>
             </f:form>
@@ -55,6 +55,7 @@ THE SOFTWARE.
 
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <input type="hidden" name="qtems" value="${children.items}"/>
                 <select name="priority">
                   <j:forEach var="priority" items="${priorities}">
                     <f:option value="${priority.value}">${priority.name}</f:option>
@@ -66,6 +67,7 @@ THE SOFTWARE.
             <f:form method="post" action="updateNode">
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <input type="hidden" name="qtems" value="${children.items}"/>
                 <select name="node">
                   <j:forEach var="node" items="${nodes}">
                     <f:option value="${node}">${node}</f:option>
@@ -78,11 +80,12 @@ THE SOFTWARE.
 
           <h3>BUILD</h3>
           <div>
-            <f:textarea value="${children.runs}" readonly="readonly"></f:textarea>
+
             <br/>
             <f:form method="post" action="abort">
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <f:textarea name="builds" id="builds" value="${children.runs}" readonly="readonly"></f:textarea>
                 <f:submit name="Submit" value="Abort"/>
               </f:block>
             </f:form>
@@ -92,6 +95,8 @@ THE SOFTWARE.
             <f:form method="post" action="cancelAndAbort">
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
+                <input type="hidden" name="qtems" value="${children.items}"/>
+                <input type="hidden" name="builds" value="${children.runs}"/>
                 <f:submit name="Submit" value="Cancel + Abort"/>
               </f:block>
             </f:form>
@@ -101,4 +106,22 @@ THE SOFTWARE.
 
     </l:main-panel>
   </l:layout>
+  <script type="text/javascript">
+    document.addEventListener("DOMContentLoaded", function() {
+      const qtems = document.getElementById('qtems');
+      qtems.addEventListener('change', (event) => {
+        const newValue = event.target.value;
+        const elements = document.querySelectorAll('input[name="qtems"]');
+        elements.forEach(item => item.value = newValue);
+      });
+
+      const builds = document.getElementById('builds');
+      builds.addEventListener('change', (event) => {
+        const newValue = event.target.value;
+        const elements = document.querySelectorAll('input[name="builds"]');
+        elements.forEach(item => item.value = newValue);
+      });
+    });
+
+  </script>
 </j:jelly>

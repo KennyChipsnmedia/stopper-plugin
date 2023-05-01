@@ -23,6 +23,7 @@ import jenkins.advancedqueue.PrioritySorterConfiguration;
 import jenkins.advancedqueue.priority.strategy.PriorityJobProperty;
 import jenkins.advancedqueue.sorter.ItemInfo;
 import jenkins.advancedqueue.sorter.QueueItemCache;
+import jenkins.advancedqueue.sorter.StartedJobItemCache;
 import jenkins.model.GlobalConfiguration;
 import jenkins.model.Jenkins;
 import jenkins.model.TransientActionFactory;
@@ -72,6 +73,58 @@ public class StopperAction implements Action {
         return "stopper";
     }
 
+    private void filterRunAndItems(StaplerRequest req, Set<Run> runs, Set<Queue.Item> items) {
+        LOGGER.log(Level.INFO, "debug req paramerters");
+        req.getParameterMap().entrySet().forEach(entry -> {
+            LOGGER.log(Level.INFO, "key:" + entry.getKey() + " v:" + entry.getValue());
+        });
+
+        List<String> qtems = new ArrayList<>();
+        List<String> builds = new ArrayList<>();;
+
+        if(req.getParameter("qtems") != null) {
+            LOGGER.log(Level.INFO, "Reuqested cancel, raw qtems=>" + req.getParameter("qtems"));
+            qtems = Arrays.asList(req.getParameter("qtems").split(","));
+        }
+        if(req.getParameter("builds") != null) {
+            LOGGER.log(Level.INFO, "Reuqested abort, raw builds=>" + req.getParameter("builds"));
+            builds =  Arrays.asList(req.getParameter("builds").split(","));
+        }
+
+        Set<Run> newRuns = new HashSet<>();
+        Set<Queue.Item> newItems = new HashSet<>();
+
+        builds.stream().filter(t -> t.trim().length() > 0).forEach(t -> {
+            String[] parray = t.split(":");
+            if(parray.length > 0) {
+                String build = parray[0];
+                runs.stream().filter(r -> r.getParent().getFullDisplayName().equals(build)).forEach(r -> {
+                    newRuns.add(r);
+                });
+
+            }
+        });
+
+        qtems.stream().filter(t -> t.trim().length() > 0).forEach(t -> {
+            String[] parray = t.split(":");
+            if(parray.length > 0) {
+                String job = parray[0];
+                items.stream().filter(i -> i.task.getName().equals(job)).forEach(i -> {
+                    newItems.add(i);
+                });
+
+            }
+        });
+
+        runs.clear();;
+        runs.addAll(newRuns);
+
+        items.clear();;
+        items.addAll(newItems);
+
+
+    }
+
     private void fetchRunAndItems(boolean isFirst, Run run, Set<Run> runs, Set<Queue.Item> items) {
         if(isFirst) {
 
@@ -101,17 +154,18 @@ public class StopperAction implements Action {
     }
 
     public List<Run> getRunList() {
-        LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " runList size:" + runList.size());
+        LOGGER.log(Level.FINE, target.getParent().getFullDisplayName() + " runList size:" + runList.size());
         runList.forEach(r -> {
-            LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
+            LOGGER.log(Level.FINE, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
         });
+
         return runList;
     }
 
     public List<Integer> getNumbers() {
         List<Integer> numbers = new ArrayList<Integer>();
         runList.forEach(r -> {
-            LOGGER.log(Level.INFO, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
+            LOGGER.log(Level.FINE, target.getParent().getFullDisplayName() + " number:" + r.getNumber());
             numbers.add(r.getNumber());
         });
         return numbers;
@@ -119,9 +173,9 @@ public class StopperAction implements Action {
 
     public ListBoxModel getPriorities() {
         ListBoxModel items = PriorityConfiguration.get().getPriorities();
-        LOGGER.log(Level.INFO, "getPriorites items size:" + items.size());
+        LOGGER.log(Level.FINE, "getPriorites items size:" + items.size());
         items.forEach(item -> {
-            LOGGER.log(Level.INFO, "priority name:" + item.name + " value:" + item.value);
+            LOGGER.log(Level.FINE, "priority name:" + item.name + " value:" + item.value);
         });
         return items;
     }
@@ -161,10 +215,18 @@ public class StopperAction implements Action {
 
         runs.forEach(r -> {
             if(r.isBuilding()) {
-                // getFullDisplayName: job_name, getDisplayName: #build_num
-                sb.append(r.getParent().getFullDisplayName() + r.getDisplayName());
-                sb.append(",");
+                sb.append(r.getParent().getFullDisplayName());
 
+                // priority
+                sb.append(":");
+                ItemInfo itemInfo = StartedJobItemCache.get().getStartedItem(r.getParent().getFullDisplayName(), r.getNumber());
+                sb.append("P" + itemInfo.getPriority());
+
+                // build number
+                sb.append(":");
+                sb.append("#" + r.getNumber());
+
+                sb.append(",");
             }
         });
         children.put("runs", sb.toString());
@@ -174,9 +236,19 @@ public class StopperAction implements Action {
 
         items.forEach(i -> {
             sb.append(i.task.getName());
+
+            // priority
+            sb.append(":");
             ItemInfo itemInfo = QueueItemCache.get().getItem(i.getId());
             int curPriority = itemInfo.getPriority();
-            sb.append("#p_" + curPriority);
+            sb.append("P" + curPriority);
+
+            // label
+            Label label = i.getAssignedLabel();
+            if(label != null) {
+                sb.append(":");
+                sb.append("L" + label.getName());
+            }
 
             sb.append(",");
             if(i.isBlocked()) {
@@ -193,18 +265,13 @@ public class StopperAction implements Action {
         return children;
     }
 
-    public void sort() {
-        // TODO
-        QueueSorter sorter = Jenkins.get().getQueue().getSorter();
-//        Jenkins.get().getQueue().getBuildableItems().sort(sorter);
-    }
-
     interface worker {
         void doit();
     }
 
     private void processRequest(StaplerRequest req, StaplerResponse rsp, int flag) {
         String tmpBuildNumber = req.getParameter("buildNumber");
+
         if(StringUtils.isBlank(tmpBuildNumber)) {
             return;
         }
@@ -218,19 +285,21 @@ public class StopperAction implements Action {
 
         //
         Run target = optRun.get();
-
         Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
         Set<Run> runs = ConcurrentHashMap.newKeySet();
 
         fetchRunAndItems(true, target, runs, items);
+        filterRunAndItems(req, runs, items);
 
         worker w1 = () -> {
             items.forEach(i -> {
+                LOGGER.log(Level.INFO, "cancel job:" + i.task.getName());
                 try {
                     Jenkins.get().getQueue().cancel(i);
                 }
                 catch (Exception e) {
-                    // do nothing
+                    LOGGER.log(Level.SEVERE, i.task.getName() + " cancel error");
+                    LOGGER.log(Level.SEVERE, e.getMessage(), e);
                 }
             });
         };
@@ -238,11 +307,13 @@ public class StopperAction implements Action {
         worker w2 = () -> {
             runs.forEach(r -> {
                 if(r != null && r.isBuilding()) {
+                    LOGGER.log(Level.INFO, "abort job:" + r.getFullDisplayName());
                     try {
                         r.getExecutor().interrupt(Result.ABORTED);
                     }
                     catch (Exception e) {
-                        // do nothing
+                        LOGGER.log(Level.SEVERE, r.getFullDisplayName() + " abort error");
+                        LOGGER.log(Level.SEVERE, e.getMessage(), e);
                     }
                 }
             });
@@ -308,8 +379,9 @@ public class StopperAction implements Action {
         Set<Run> runs = ConcurrentHashMap.newKeySet();
 
         fetchRunAndItems(true, target, runs, items);
-        int tmpPriority = Integer.parseInt(priority);
+        filterRunAndItems(req, runs, items);
 
+        int tmpPriority = Integer.parseInt(priority);
         int newPriority = tmpPriority == -1 ? PrioritySorterConfiguration.get().getStrategy().getDefaultPriority() : tmpPriority;
 
         items.forEach(i -> {
@@ -321,43 +393,6 @@ public class StopperAction implements Action {
         Jenkins.get().getQueue().maintain();
 
         rsp.forwardToPreviousPage(req);
-
-
-        // Priority
-        /* debug
-        QueueSorter sorter = Jenkins.get().getQueue().getSorter();
-        List<Queue.BuildableItem> buildableItems = Jenkins.get().getQueue().getBuildableItems();
-        sorter.sortBuildableItems(buildableItems);
-
-
-        Collections.sort(buildableItems, new Comparator<Queue.BuildableItem>() {
-            @Override
-            public int compare(Queue.BuildableItem o1, Queue.BuildableItem o2) {
-                ItemInfo itemInfo1 = QueueItemCache.get().getItem(o1.getId());
-                ItemInfo itemInfo2 = QueueItemCache.get().getItem(o2.getId());
-                LOGGER.log(Level.INFO, "j1:" + o1.task.getName() +  " w1:" + itemInfo1.getWeight() +  " j2:" + o2.task.getName() + " w2:" + itemInfo2.getWeight());
-                float diff = itemInfo1.getWeight() - itemInfo2.getWeight();
-
-                if(diff > 0) {
-                    return 1;
-                }
-                else if(diff < 0) {
-                    return -1;
-                }
-                else {
-                    return 0;
-                }
-            }
-        });
-        LOGGER.log(Level.INFO, "========= NEW PRIORITY FOR ITEM ==============");
-        buildableItems.forEach(i -> {
-            ItemInfo itemInfo = QueueItemCache.get().getItem(i.getId());
-            int priority = itemInfo.getPriority();
-            LOGGER.log(Level.INFO, "name:" + i.task.getName() + " priority:" + priority);
-        });
-        */
-
-
 
     }
 
@@ -385,135 +420,30 @@ public class StopperAction implements Action {
         Run target = optRun.get();
         Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
         Set<Run> runs = ConcurrentHashMap.newKeySet();
-        fetchRunAndItems(true, target, runs, items);
 
+        fetchRunAndItems(true, target, runs, items);
+        filterRunAndItems(req, runs, items);
 
         Node newNode = Jenkins.get().getNode(node);
         if(newNode != null) {
             items.forEach(i -> {
 
-                Label label = i.getAssignedLabel();
-                if(label != null) {
-                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label:" + label.getName());
-
-                    Iterator iter = i.getActions(LabelAssignmentAction.class).iterator();
-
-                    Label l = null;
-                    do {
-                        if (!iter.hasNext()) {
-                            l = i.task.getAssignedLabel();
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND label:" + l.getName());
-                            break;
+                // NodeLabelParameter plugin use ParametersAction as LabelAssignmentAction.
+                // If exists LabelParameterValue, remove it.
+                i.getActions(ParametersAction.class).forEach(action -> {
+                    List<ParameterValue> parameters = action.getAllParameters();
+                    parameters.forEach(p -> {
+                        if(p instanceof LabelParameterValue) {
+                            i.removeAction(action);
                         }
-
-                        LabelAssignmentAction laa = (LabelAssignmentAction)iter.next();
-                        l = laa.getAssignedLabel(i.task);
-
-                        if(laa instanceof ParametersAction) {
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " laa ParametersAction");
-                            Label l2 = ((ParametersAction) laa).getAssignedLabel(i.task);
-//                                ((ParametersAction) laa).getParameters().forEach(parameterValue -> {
-//                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameterValue:" + parameterValue.toString());
-//                                });
-                            if(l2 != null) {
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " l2:" + l2.toString());
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa size:" + ((ParametersAction) laa).getParameters().size());
-                                ((ParametersAction) laa).getParameters().forEach(p -> {
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " pa:" + p.toString() + " name:" + p.getName() + " value:" + p.getValue());
-                                    if(p instanceof LabelParameterValue) {
-                                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " it's LabelParameterValue");
-                                    }
-                                });
-                            }
-
-                        }
-                    } while(l == null);
-
-                    if(l != null) {
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " FOUND2 label:" + l.getName());
-                    }
-
-                }
-
-                    /*
-                    if(label != null) {
-                        LOGGER.log(Level.INFO, "jobname:" + i.task.getName() + " set node to:" + newNode.getNodeName());
-                        Set<Node> nodes = label.getNodes();
-                        nodes.clear();
-                        nodes.add(newNode);
-                    }
-                    else {
-                        LabelParameterValue paramValue = new LabelParameterValue(newNode.getNodeName(), newNode.getLabelString(), false, new AllNodeEligibility());
-                        ParametersAction parametersAction = new ParametersAction(paramValue);
-                        i.addAction(parametersAction);
-                    }
-                    */
-
-                    /*
-                    LabelParameterValue paramValue = new LabelParameterValue(newNode.getNodeName(), newNode.getLabelString(), false, new AllNodeEligibility());
-                    ParametersAction parametersAction = new ParametersAction(paramValue);
-
-                    if(label == null) {
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label null add action");
-                        i.addAction(parametersAction);
-                    }
-                    else {
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " assignedLabel:" + label.getName());
-                        LabelAssignmentAction action = i.getAction(LabelAssignmentAction.class);
-                        if(action instanceof ParametersAction) {
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " action is ParametersAction");
-                            ParametersAction paramAction = (ParametersAction)action;
-                            List<ParameterValue> parameters = paramAction.getAllParameters();
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameters size:" + parameters.size());
-                            parameters.forEach(p -> {
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameter is:" + p.toString());
-                                if(p instanceof LabelParameterValue) {
-                                    i.removeAction(action);
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label not null paramAction removed");
-                                }
-                                else {
-                                    LOGGER.log(Level.INFO, "item:" + i.task.getName() + " not instance of LabelParameterValue, name:" + p.getName());
-                                }
-                            });
-                        }
-
-                        i.addAction(parametersAction);
-                    }
-                    */
-
-
-
-                i.getAllActions().forEach(a ->{
-                    if(a instanceof ParametersAction) {
-                        ParametersAction action = (ParametersAction)a;
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " action is ParametersAction");
-                        List<ParameterValue> parameters = action.getAllParameters();
-
-                        LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameters size:" + parameters.size());
-                        parameters.forEach(p -> {
-
-                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " parameter is:" + p.toString());
-                            if(p instanceof LabelParameterValue) {
-                                i.removeAction(action);
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " label not null paramAction removed");
-                            }
-                            else {
-                                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " not instance of LabelParameterValue, name:" + p.getName());
-                            }
-                        });
-                    }
+                    });
                 });
-//                    LabelParameterValue paramValue = new LabelParameterValue(newNode.getNodeName(), newNode.getLabelString(), false, new AllNodeEligibility());
+
+                // Add requested node
                 List<String> labels = new ArrayList<>();
                 labels.add(newNode.getNodeName());
                 NodeParameterValue paramValue = new NodeParameterValue(newNode.getNodeName(), labels, new AllNodeEligibility());
-//                    NodeParameterDefinition npd = new NodeParameterDefinition()
-
                 ParametersAction parametersAction = new ParametersAction(paramValue);
-
-                LOGGER.log(Level.INFO, "item:" + i.task.getName() + " DEBUG bef addAction size:" + parametersAction.getAllParameters().size());
-
-
                 i.addAction(parametersAction);
             });
         }
