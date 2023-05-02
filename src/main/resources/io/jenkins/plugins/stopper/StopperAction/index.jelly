@@ -56,7 +56,7 @@ THE SOFTWARE.
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
                 <input type="hidden" name="qtems" value="${children.items}"/>
-                <select name="priority">
+                <select name="priority" style="width:200px;">
                   <j:forEach var="priority" items="${priorities}">
                     <f:option value="${priority.value}">${priority.name}</f:option>
                   </j:forEach>
@@ -64,15 +64,18 @@ THE SOFTWARE.
                 <f:submit name="Submit" value="Change"/>
               </f:block>
             </f:form>
-            <f:form method="post" action="updateNode">
+            <f:form method="post" action="updateLabel">
               <f:block>
                 <input type="hidden" name="buildNumber" value="${run.number}"/>
                 <input type="hidden" name="qtems" value="${children.items}"/>
+                <!-- node select not using
                 <select name="node">
                   <j:forEach var="node" items="${nodes}">
                     <f:option value="${node}">${node}</f:option>
                   </j:forEach>
                 </select> <j:whitespace />
+                -->
+                <input type="text" name="label" placeholder="Label" style="width:200px;"/>
                 <f:submit name="Submit" value="Change"/>
               </f:block>
             </f:form>

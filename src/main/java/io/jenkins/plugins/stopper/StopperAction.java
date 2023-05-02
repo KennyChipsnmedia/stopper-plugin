@@ -397,6 +397,78 @@ public class StopperAction implements Action {
     }
 
     @RequirePOST
+    public void doUpdateLabel(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
+        String tmpBuildNumber = req.getParameter("buildNumber");
+        if(StringUtils.isBlank(tmpBuildNumber)) {
+            rsp.forwardToPreviousPage(req);
+            return;
+        }
+
+        String label = req.getParameter("label");
+        if(StringUtils.isBlank(label)) {
+            rsp.forwardToPreviousPage(req);
+            return;
+        }
+
+        //
+        int buildNumber = Integer.parseInt(tmpBuildNumber);
+        Optional<Run> optRun = runList.stream().filter(r -> r.getNumber() == buildNumber).findAny();
+        if(optRun.isEmpty()) {
+            return;
+        }
+
+        Run target = optRun.get();
+        Set<Queue.Item> items = ConcurrentHashMap.newKeySet();
+        Set<Run> runs = ConcurrentHashMap.newKeySet();
+
+        fetchRunAndItems(true, target, runs, items);
+        filterRunAndItems(req, runs, items);
+
+        if(label.equals("built-in") || label.equals("default")) {
+            items.forEach(i -> {
+                i.getActions(ParametersAction.class).forEach(action -> {
+                    action.getAllParameters().forEach(p -> {
+                        if(p instanceof LabelParameterValue) {
+                            i.removeAction(action);
+                            LOGGER.log(Level.INFO, "item:" + i.task.getName() + " built-in, old paramAction removed");
+                        }
+                    });
+                });
+
+            });
+
+        }
+        else {
+            items.forEach(i -> {
+
+                // NodeLabelParameter plugin use ParametersAction as LabelAssignmentAction.
+                // If exists LabelParameterValue, remove it.
+                i.getActions(ParametersAction.class).forEach(action -> {
+                    List<ParameterValue> parameters = action.getAllParameters();
+                    parameters.forEach(p -> {
+                        if(p instanceof LabelParameterValue) {
+                            i.removeAction(action);
+                        }
+                    });
+                });
+                LabelParameterValue paramValue = new LabelParameterValue(label, label, false, new AllNodeEligibility());
+                ParametersAction parametersAction = new ParametersAction(paramValue);
+                i.addAction(parametersAction);
+
+                // Add requested label
+//                List<String> labels = new ArrayList<>();
+//                labels.add(newNode.getNodeName());
+//                NodeParameterValue paramValue = new NodeParameterValue(newNode.getNodeName(), labels, new AllNodeEligibility());
+//                ParametersAction parametersAction = new ParametersAction(paramValue);
+//                i.addAction(parametersAction);
+            });
+        }
+
+        Jenkins.get().getQueue().maintain();
+        rsp.forwardToPreviousPage(req);
+    }
+
+    @RequirePOST
     public void doUpdateNode(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
         String tmpBuildNumber = req.getParameter("buildNumber");
         if(StringUtils.isBlank(tmpBuildNumber)) {
@@ -478,6 +550,7 @@ public class StopperAction implements Action {
 
         rsp.forwardToPreviousPage(req);
     }
+
 
     @Extension
     public static class RunStopperActionFactory extends TransientActionFactory<Run> {
